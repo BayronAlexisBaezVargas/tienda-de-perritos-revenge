@@ -2,12 +2,14 @@ name: CI/CD Tienda Perritos - Frontend
 on:
   push:
     branches: [ "main" ]
+
 jobs:
   build-push-deploy-frontend:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout código
         uses: actions/checkout@v3
+
       - name: Configurar credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -15,26 +17,42 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Login en Amazon ECR (runner)
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
+
       - name: Build imagen Frontend y push a ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          # Extraemos el nombre del repositorio de la URL completa de tu secreto
+          ECR_REPOSITORY: ecr-front 
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           cd frontend
-          docker build -t tienda-frontend .
-          docker tag tienda-frontend:latest ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest
-          docker push ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest
+          # Construimos y tagueamos con el SHA del commit para tener un historial real
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          # También le dejamos el tag latest por si acaso
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
       - name: Descargar Task Definition actual
         run: |
           aws ecs describe-task-definition \
             --task-definition ${{ secrets.ECS_TASK_DEFINITION_NAME }} \
+            --region ${{ secrets.AWS_REGION }} \
             --query taskDefinition > task-definition.json
+
       - name: Actualizar Tag de la imagen en la Task Def
         id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
-          container-name: front-perritos
-          image: ${{ secrets.ECR_REPO_URL_FRONTEND }}:latest
+          container-name: taskfront #  Corregido para que coincida con tu JSON ("name": "taskfront")
+          image: ${{ steps.login-ecr.outputs.registry }}/ecr-front:${{ github.sha }}
+
       - name: Desplegar nueva Task Definition en el Servicio
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
