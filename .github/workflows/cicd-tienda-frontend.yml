@@ -47,9 +47,7 @@ jobs:
 
       - name: Sanitizar Task Definition para MANAGED_INSTANCES
         run: |
-          # MANAGED_INSTANCES prohíbe CPU/Memory globales y exige que estén solo en el contenedor.
-          # Usamos jq para limpiar esos campos y evitar el error de compatibilidad.
-          jq 'del(.cpu, .memory, .requiresCompatibilities)' raw-task-definition.json > task-definition.json
+          jq 'del(.taskDefinitionArn, .revision, .status, .registeredAt, .registeredBy, .compatibilities, .cpu, .memory) | .requiresCompatibilities=["EXTERNAL"]' raw-task-definition.json > task-definition.json
 
       - name: Actualizar Tag de la imagen en la Task Def
         id: render-task-def
