@@ -1,4 +1,5 @@
 name: CI/CD Tienda Perritos - Frontend
+
 on:
   push:
     branches: [ "main" ]
@@ -25,16 +26,15 @@ jobs:
       - name: Build imagen Frontend y push a ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          # Extraemos el nombre del repositorio de la URL completa de tu secreto
           ECR_REPOSITORY: ecr-front 
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd frontend
-          # Construimos y tagueamos con el SHA del commit para tener un historial real
+          # Construimos y tagueamos con el SHA del commit para mantener un historial limpio
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           
-          # También le dejamos el tag latest por si acaso
+          # También dejamos el tag :latest como respaldo
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
@@ -43,14 +43,20 @@ jobs:
           aws ecs describe-task-definition \
             --task-definition ${{ secrets.ECS_TASK_DEFINITION_NAME }} \
             --region ${{ secrets.AWS_REGION }} \
-            --query taskDefinition > task-definition.json
+            --query taskDefinition > raw-task-definition.json
+
+      - name: Sanitizar Task Definition para MANAGED_INSTANCES
+        run: |
+          # MANAGED_INSTANCES prohíbe CPU/Memory globales y exige que estén solo en el contenedor.
+          # Usamos jq para limpiar esos campos y evitar el error de compatibilidad.
+          jq 'del(.cpu, .memory, .requiresCompatibilities)' raw-task-definition.json > task-definition.json
 
       - name: Actualizar Tag de la imagen en la Task Def
         id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
-          container-name: taskfront #  Corregido para que coincida con tu JSON ("name": "taskfront")
+          container-name: taskfront # Coincide exactamente con el "name" en tu JSON
           image: ${{ steps.login-ecr.outputs.registry }}/ecr-front:${{ github.sha }}
 
       - name: Desplegar nueva Task Definition en el Servicio
